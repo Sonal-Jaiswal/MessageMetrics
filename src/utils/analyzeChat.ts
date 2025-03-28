@@ -1,5 +1,4 @@
-
-import { parseChat, ParsedChat } from './chatParser';
+import { parseChat, ParsedChat, isCallMessage, extractCallDuration, isOutgoingCall } from './chatParser';
 
 export interface ChatAnalytics {
   totalMessages: number;
@@ -42,43 +41,34 @@ export const emptyAnalytics: ChatAnalytics = {
 
 // Helper to identify if a line contains an image
 const isImageMessage = (line: string): boolean => {
-  return line.includes('image omitted') || 
-         line.includes('<image>') ||
-         line.includes('IMG-') ||
-         line.includes('.jpg') || 
-         line.includes('.jpeg') || 
-         line.includes('.png') || 
-         line.includes('.gif');
+  const imagePatterns = [
+    'image omitted',
+    '<image>',
+    'IMG-',
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    'photo omitted',
+    'attachment: photo',
+    'attachment: image'
+  ];
+  
+  const lowerLine = line.toLowerCase();
+  return imagePatterns.some(pattern => lowerLine.includes(pattern.toLowerCase()));
 };
 
 // Helper to identify if a line contains a sticker
 const isStickerMessage = (line: string): boolean => {
-  return line.includes('sticker omitted') || 
-         line.includes('<sticker>') || 
-         line.includes('sticker.webp');
-};
-
-// Helper to identify if a line contains a call
-const isCallMessage = (line: string): boolean => {
-  return line.includes('Missed voice call') || 
-         line.includes('voice call') || 
-         line.includes('video call') || 
-         line.includes('call ended') || 
-         line.includes('call time');
-};
-
-// Extract call duration in seconds from a call message
-const extractCallDuration = (line: string): number => {
-  // Try to find patterns like "call time 5:23" or "call ended (Duration: 10:45)"
-  const durationMatch = line.match(/(\d+):(\d+)/);
+  const stickerPatterns = [
+    'sticker omitted',
+    '<sticker>',
+    'sticker.webp',
+    'attachment: sticker'
+  ];
   
-  if (durationMatch) {
-    const minutes = parseInt(durationMatch[1], 10);
-    const seconds = parseInt(durationMatch[2], 10);
-    return (minutes * 60) + seconds;
-  }
-  
-  return 0;
+  const lowerLine = line.toLowerCase();
+  return stickerPatterns.some(pattern => lowerLine.includes(pattern.toLowerCase()));
 };
 
 // Identify if a message is from the current user or not
@@ -89,22 +79,39 @@ const isFromCurrentUser = (line: string, currentUser?: string): boolean => {
     return line.includes("You:") || line.includes("You ");
   }
   
+  // Match with the format [timestamp] CurrentUser: message
+  const timestampMatch = line.match(/\[\d{1,2}\/\d{1,2}\/(\d{2,4}|\d{2}),\s\d{1,2}:\d{2}(:\d{2})?\s?([AP]M)?\]\s([^:]+):/);
+  if (timestampMatch && timestampMatch[4]) {
+    const sender = timestampMatch[4].trim();
+    return sender === currentUser;
+  }
+  
   return line.includes(`${currentUser}:`);
 };
 
 // Count words in a message
 const countWords = (text: string): number => {
+  if (!text || typeof text !== 'string') return 0;
+  
   const cleanText = text.replace(/[^\w\s]/g, '').trim();
-  return cleanText.split(/\s+/).filter(Boolean).length;
+  const words = cleanText.split(/\s+/).filter(Boolean);
+  return words.length;
 };
 
 // Extract message content from a WhatsApp message line
 const extractWhatsAppMessageContent = (line: string): string => {
   // Try to match the content after the timestamp and sender
-  const contentMatch = line.match(/]:\s(.+)$/);
-  if (contentMatch) {
+  const contentMatch = line.match(/]\s[^:]+:\s(.+)$/);
+  if (contentMatch && contentMatch[1]) {
     return contentMatch[1].trim();
   }
+  
+  // If no match found with the first pattern, try a more general one
+  const fallbackMatch = line.match(/\[[^\]]+\]\s([^:]+:)?\s*(.+)$/);
+  if (fallbackMatch && fallbackMatch[2]) {
+    return fallbackMatch[2].trim();
+  }
+  
   return '';
 };
 
@@ -114,8 +121,13 @@ const processWhatsAppChat = (content: string, currentUser?: string): ChatAnalyti
   let totalWordCount = 0;
   let messagesWithResponses = 0;
   let previousMessageFromUser = false;
+  let callCount = 0;
   
   const lines = content.split('\n');
+  
+  // Log info about the chat to help debugging
+  console.log("Processing WhatsApp chat with", lines.length, "lines");
+  console.log("Current user identified as:", currentUser);
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -130,6 +142,30 @@ const processWhatsAppChat = (content: string, currentUser?: string): ChatAnalyti
     if (isMessageLine) {
       // This is a new message
       analytics.totalMessages++;
+      
+      // Handle call messages separately
+      if (isCallMessage(line)) {
+        console.log("Call message detected:", line);
+        callCount++;
+        
+        // Determine if call is outgoing or incoming
+        const outgoing = isOutgoingCall(line, currentUser);
+        
+        if (outgoing) {
+          analytics.outgoingCalls++;
+        } else {
+          analytics.incomingCalls++;
+        }
+        
+        // Extract call duration
+        const callDuration = extractCallDuration(line);
+        if (callDuration > 0) {
+          console.log("Call duration extracted:", callDuration, "seconds");
+          analytics.totalCallDuration += callDuration;
+        }
+        
+        continue; // Skip further processing for call messages
+      }
       
       // Check if from current user
       const fromCurrentUser = isFromCurrentUser(line, currentUser);
@@ -151,49 +187,41 @@ const processWhatsAppChat = (content: string, currentUser?: string): ChatAnalyti
       // Check for media
       if (isImageMessage(line)) {
         fromCurrentUser ? analytics.imagesSent++ : analytics.imagesReceived++;
+        continue; // Skip word count for media messages
       }
       
       if (isStickerMessage(line)) {
         fromCurrentUser ? analytics.stickersSent++ : analytics.stickersReceived++;
+        continue; // Skip word count for media messages
       }
       
-      // Check for calls
-      if (isCallMessage(line)) {
-        if (line.includes('Missed')) {
-          // Skip missed calls in duration calculation
-          continue;
-        }
-        
-        if (fromCurrentUser || line.includes('outgoing')) {
-          analytics.outgoingCalls++;
-        } else {
-          analytics.incomingCalls++;
-        }
-        
-        const callDuration = extractCallDuration(line);
-        analytics.totalCallDuration += callDuration;
-      }
-      
-      // Extract actual message content
+      // Extract actual message content and count words
       const messageContent = extractWhatsAppMessageContent(line);
       const wordCount = countWords(messageContent);
-      totalWordCount += wordCount;
       
-      // Check for short replies (5 or fewer words)
-      if (wordCount <= 5 && wordCount > 0) {
-        analytics.shortReplies++;
-      }
-      
-      // Check for long messages (50+ words)
-      if (wordCount >= 50) {
-        fromCurrentUser ? analytics.longMessagesSent++ : analytics.longMessagesReceived++;
+      if (wordCount > 0) {
+        totalWordCount += wordCount;
+        
+        // Check for short replies (5 or fewer words)
+        if (wordCount <= 5) {
+          analytics.shortReplies++;
+        }
+        
+        // Check for long messages (50+ words)
+        if (wordCount >= 50) {
+          fromCurrentUser ? analytics.longMessagesSent++ : analytics.longMessagesReceived++;
+        }
       }
     }
   }
   
+  console.log("Found", callCount, "call messages in the chat");
+  console.log("Call stats - Outgoing:", analytics.outgoingCalls, "Incoming:", analytics.incomingCalls, "Total duration:", analytics.totalCallDuration);
+  
   // Calculate averages and rates
-  if (analytics.totalMessages > 0) {
-    analytics.avgMessageLength = totalWordCount / analytics.totalMessages;
+  const messageCount = analytics.messagesSent + analytics.messagesReceived - analytics.imagesSent - analytics.imagesReceived - analytics.stickersSent - analytics.stickersReceived;
+  if (messageCount > 0) {
+    analytics.avgMessageLength = totalWordCount / messageCount;
   }
   
   if (analytics.outgoingCalls + analytics.incomingCalls > 0) {

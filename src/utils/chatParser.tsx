@@ -36,6 +36,81 @@ const extractCurrentUser = (content: string): string | undefined => {
   return undefined;
 };
 
+// Enhanced function to detect call-related messages with more patterns
+export const isCallMessage = (line: string): boolean => {
+  const callPatterns = [
+    'missed voice call',
+    'missed video call',
+    'voice call',
+    'video call',
+    'call ended',
+    'call time',
+    'started a call',
+    'called you',
+    'you called',
+    'incoming voice call',
+    'incoming video call',
+    'outgoing voice call',
+    'outgoing video call'
+  ];
+  
+  const lowerLine = line.toLowerCase();
+  return callPatterns.some(pattern => lowerLine.includes(pattern.toLowerCase()));
+};
+
+// Enhanced function to extract call duration in seconds
+export const extractCallDuration = (line: string): number => {
+  // Format: "call time X:XX" or "Duration: X:XX" or "call lasted X:XX"
+  const durationPatterns = [
+    /call time (\d+):(\d+)/i,
+    /duration:?\s*(\d+):(\d+)/i,
+    /call lasted (\d+):(\d+)/i,
+    /call time:?\s*(\d+):(\d+)/i,
+    /call duration:?\s*(\d+):(\d+)/i,
+    /call ended \((\d+):(\d+)\)/i,
+    /call ended after (\d+):(\d+)/i,
+    /call .*?(\d+) min(?:ute)?s?,? (\d+) sec(?:ond)?s?/i,
+    /(\d+):(\d+) call/i
+  ];
+  
+  for (const pattern of durationPatterns) {
+    const match = line.match(pattern);
+    if (match) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseInt(match[2], 10);
+      return (minutes * 60) + seconds;
+    }
+  }
+  
+  // Check for patterns with only minutes
+  const minutesOnlyPattern = /(\d+) min(?:ute)?s?/i;
+  const minutesMatch = line.match(minutesOnlyPattern);
+  if (minutesMatch) {
+    return parseInt(minutesMatch[1], 10) * 60;
+  }
+  
+  return 0;
+};
+
+// Determine if a call message is outgoing
+export const isOutgoingCall = (line: string, currentUser?: string): boolean => {
+  const lowerLine = line.toLowerCase();
+  
+  // Direct indications
+  if (lowerLine.includes('you called') || 
+      lowerLine.includes('outgoing call') ||
+      lowerLine.includes('you started a call')) {
+    return true;
+  }
+  
+  // If we have a current user and they are mentioned as initiating the call
+  if (currentUser && lowerLine.includes(`${currentUser.toLowerCase()} started a call`)) {
+    return true;
+  }
+  
+  return false;
+};
+
 // WhatsApp chat parsing
 export const parseWhatsAppZip = async (file: File): Promise<ParsedChat> => {
   try {

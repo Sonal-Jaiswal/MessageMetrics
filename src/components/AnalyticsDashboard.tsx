@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { 
-  MessageSquare, Image, Phone, MoveUpRight, 
-  MoveDownRight, Clock, Sticker, FileText
+  MessageSquare, Image, Clock, Sticker, FileText,
+  ArrowDown, ArrowUp, Phone, PhoneOutgoing, PhoneIncoming
 } from 'lucide-react';
 import StatCard from './StatCard';
 import { formatDuration } from '@/utils/formatters';
@@ -29,12 +29,12 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ analytics, clas
           <StatCard
             title="Messages Sent"
             value={analytics.messagesSent}
-            icon={MoveUpRight}
+            icon={ArrowUp}
           />
           <StatCard
             title="Messages Received"
             value={analytics.messagesReceived}
-            icon={MoveDownRight}
+            icon={ArrowDown}
           />
           <StatCard
             title="Short Replies"
@@ -52,12 +52,12 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ analytics, clas
             <StatCard
               title="Outgoing Calls"
               value={analytics.outgoingCalls}
-              icon={MoveUpRight}
+              icon={PhoneOutgoing}
             />
             <StatCard
               title="Incoming Calls"
               value={analytics.incomingCalls}
-              icon={MoveDownRight}
+              icon={PhoneIncoming}
             />
             <StatCard
               title="Total Call Time"
@@ -79,12 +79,12 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ analytics, clas
             <StatCard
               title="Images Sent"
               value={analytics.imagesSent}
-              icon={MoveUpRight}
+              icon={ArrowUp}
             />
             <StatCard
               title="Images Received"
               value={analytics.imagesReceived}
-              icon={MoveDownRight}
+              icon={ArrowDown}
             />
             <StatCard
               title="Stickers Sent"

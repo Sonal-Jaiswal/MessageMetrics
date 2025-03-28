@@ -6,12 +6,14 @@ import { useToast } from '@/hooks/use-toast';
 import { ChatAnalytics, analyzeChat, emptyAnalytics } from '@/utils/analyzeChat';
 import { MessageSquare, AlertCircle } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import { searchChatContent, SearchResult } from '@/utils/searchUtils';
 
 const Index = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analytics, setAnalytics] = useState<ChatAnalytics | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [chatContent, setChatContent] = useState<string>('');
   const { toast } = useToast();
 
   const handleFileSelected = async (selectedFile: File) => {
@@ -39,6 +41,37 @@ const Index = () => {
       
       setAnalytics(results);
       
+      // Store the raw content for searching
+      if (selectedFile.name.toLowerCase().endsWith('.zip')) {
+        // For zip files, we need to extract the content
+        import('jszip').then(async ({ default: JSZip }) => {
+          const zip = new JSZip();
+          const zipContent = await zip.loadAsync(selectedFile);
+          
+          // Find the chat file
+          let chatFile = zipContent.file("_chat.txt");
+          if (!chatFile) {
+            // Try to find any text file
+            const textFiles = Object.keys(zipContent.files).filter(
+              name => name.endsWith('.txt')
+            );
+            
+            if (textFiles.length > 0) {
+              chatFile = zipContent.file(textFiles[0]);
+            }
+          }
+          
+          if (chatFile) {
+            const content = await chatFile.async("string");
+            setChatContent(content);
+          }
+        });
+      } else if (selectedFile.name.toLowerCase().endsWith('.html')) {
+        // For HTML files, we can get the content directly
+        const content = await selectedFile.text();
+        setChatContent(content);
+      }
+      
       toast({
         title: "Analysis Complete",
         description: `Found ${results.totalMessages} messages in your chat!`,
@@ -54,9 +87,16 @@ const Index = () => {
         variant: "destructive",
       });
       setAnalytics(null);
+      setChatContent('');
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // Function to search the chat content
+  const handleSearch = (term: string): SearchResult[] => {
+    if (!chatContent || !term.trim()) return [];
+    return searchChatContent(chatContent, term);
   };
 
   return (
@@ -111,6 +151,7 @@ const Index = () => {
                 onClick={() => {
                   setAnalytics(null);
                   setAnalysisError(null);
+                  setChatContent('');
                 }}
                 className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
               >
@@ -118,7 +159,10 @@ const Index = () => {
               </button>
             </div>
             
-            <AnalyticsDashboard analytics={analytics} />
+            <AnalyticsDashboard 
+              analytics={analytics} 
+              searchFunction={chatContent ? handleSearch : undefined}
+            />
           </div>
         )}
       </main>
